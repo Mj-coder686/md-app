@@ -29,6 +29,8 @@
                 <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             </intent-filter>
 
             <intent-filter>
@@ -37,6 +39,8 @@
                 <data android:mimeType="text/markdown" />
                 <data android:mimeType="text/x-markdown" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             </intent-filter>
         </activity>
 

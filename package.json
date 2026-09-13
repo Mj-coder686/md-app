@@ -1,13 +1,14 @@
 {
   "name": "md-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/copy-pdf-assets.mjs && tsc --noEmit && vite build",
     "check": "tsc --noEmit",
-    "sync": "npm run build && cap sync android"
+    "sync": "npm run build && cap sync android",
+    "test": "npm run build && node tests/readers.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
@@ -15,14 +16,18 @@
     "dompurify": "^3.4.0",
     "highlight.js": "^11.12.0",
     "katex": "^0.18.0",
+    "mammoth": "^1.12.3",
     "marked": "^18.0.11",
-    "marked-katex-extension": "^5.1.12"
+    "marked-katex-extension": "^5.1.12",
+    "pdfjs-dist": "^5.6.205"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.1",
     "@types/dompurify": "^3.2.0",
     "@types/katex": "^0.16.7",
     "typescript": "^5.9.2",
-    "vite": "^7.1.4"
+    "vite": "^7.1.4",
+    "jszip": "^3.10.2",
+    "playwright-core": "^1.63.0"
   }
 }
