@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">MD</string>
-    <string name="title_activity_main">MD</string>
+    <string name="app_name">轻阅</string>
+    <string name="title_activity_main">轻阅</string>
     <string name="package_name">local.markdown.reader</string>
     <string name="custom_url_scheme">local.markdown.reader</string>
 </resources>

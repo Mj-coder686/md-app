@@ -2,10 +2,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'local.markdown.reader',
-  appName: 'MD',
+  appName: '轻阅',
   webDir: 'dist',
   android: {
-    backgroundColor: '#F7F5F1'
+    backgroundColor: '#F4F6FA'
   }
 };
 

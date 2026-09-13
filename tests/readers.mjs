@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 import JSZip from 'jszip';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = resolve(project, 'dist');
+const dist = resolve(process.env.READER_DIST || resolve(project, 'dist'));
 const screenshots = resolve(process.env.READER_SCREENSHOTS || resolve(project, 'work/screenshots'));
 await mkdir(screenshots, { recursive: true });
 const executablePath = process.env.CHROME_PATH || [
@@ -46,6 +46,14 @@ const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'zh-CN' });
   context.setDefaultTimeout(15000);
+  if (process.env.READER_OLDER_WEBVIEW === '1') {
+    await context.addInitScript(() => {
+      delete Map.prototype.getOrInsertComputed;
+      delete WeakMap.prototype.getOrInsertComputed;
+      delete Promise.try;
+      delete Uint8Array.prototype.toHex;
+    });
+  }
   const errors = [], external = [];
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
   // Serve packaged assets from disk. Offline mode rejects any real network access.
@@ -58,7 +66,13 @@ try {
     if (!file.startsWith(dist + sep)) throw new Error('Invalid asset path');
     if (path === '/favicon.ico') { await route.fulfill({ status: 204 }); return; }
     const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.woff2': 'font/woff2' };
-    try { await route.fulfill({ body: await readFile(file), contentType: types[extname(file)] || 'application/octet-stream' }); }
+    try {
+      let body = await readFile(file);
+      if (process.env.READER_OLDER_WEBVIEW === '1' && path.includes('pdf.worker')) {
+        body = Buffer.concat([Buffer.from('delete Map.prototype.getOrInsertComputed; delete WeakMap.prototype.getOrInsertComputed; delete Promise.try; delete Uint8Array.prototype.toHex;\n'), body]);
+      }
+      await route.fulfill({ body, contentType: types[extname(file)] || 'application/octet-stream' });
+    }
     catch { errors.push(`Missing packaged asset ${path}`); await route.fulfill({ status: 404 }); }
   });
   const page = await context.newPage();
@@ -99,20 +113,39 @@ try {
   const pdf = { name: '离线电子书.pdf', mimeType: 'application/pdf', buffer: pdfFixture() };
   console.log('Checking PDF…');
   await page.setInputFiles('#file-input', pdf);
-  await page.waitForFunction(() => document.querySelector('.pdf-message')?.hidden && document.querySelector('[data-pdf-count]')?.textContent === '/ 3');
+  await page.waitForFunction(() => document.querySelector('.pdf-message')?.hidden && document.querySelector('[data-pdf-count]')?.textContent === '/ 3').catch(async error => {
+    console.error('PDF compatibility failure:', await page.locator('.pdf-message').textContent(), 'pages:', await page.locator('[data-pdf-count]').textContent());
+    throw error;
+  });
+  assert.ok(await page.locator('.pdf-sheet canvas').evaluate(canvas => {
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 0; i < pixels.length; i += 4) if (pixels[i] < 220 && pixels[i + 3] > 0) return true;
+    return false;
+  }), 'PDF must contain rendered pixels, not just a page count');
+  await page.evaluate(() => { window.firstPdfCanvas = document.querySelector('.pdf-sheet canvas'); });
   await page.click('[data-pdf-next]');
+  await page.waitForFunction(() => document.querySelector('[data-pdf-page]')?.value === '2' && document.querySelector('.pdf-message')?.hidden);
+  await page.click('[data-pdf-prev]');
+  await page.waitForFunction(() => document.querySelector('[data-pdf-page]')?.value === '1' && document.querySelector('.pdf-sheet canvas') === window.firstPdfCanvas);
+  await page.evaluate(() => {
+    document.querySelector('[data-pdf-next]').click();
+    document.querySelector('[data-pdf-next]').click();
+    document.querySelector('[data-pdf-prev]').click();
+  });
   await page.waitForFunction(() => document.querySelector('[data-pdf-page]')?.value === '2' && document.querySelector('.pdf-message')?.hidden);
   await page.click('[data-pdf-zoom="1"]');
   await page.waitForFunction(() => document.querySelector('[data-pdf-fit]')?.textContent === '125%' && document.querySelector('.pdf-message')?.hidden);
   await page.evaluate(() => { document.querySelector('.pdf-stage').scrollTop = 100; });
   await page.waitForTimeout(100);
+  const savedPdfScroll = await page.locator('.pdf-stage').evaluate(el => el.scrollTop);
   await page.waitForTimeout(2300);
   await page.screenshot({ path: resolve(screenshots, 'PDF-阅读.png') });
   await page.click('[data-view="library"]');
   await page.reload(); await page.click('[data-category="pdf"]'); await page.click('[data-open-doc]');
   await page.waitForFunction(() => document.querySelector('[data-pdf-page]')?.value === '2' && document.querySelector('.pdf-message')?.hidden);
   assert.equal(await page.locator('[data-pdf-fit]').textContent(), '125%');
-  assert.ok(await page.locator('.pdf-stage').evaluate(el => el.scrollTop) >= 90);
+  assert.ok(Math.abs(await page.locator('.pdf-stage').evaluate(el => el.scrollTop) - savedPdfScroll) <= 1,
+    JSON.stringify(await page.evaluate(() => ({ top: document.querySelector('.pdf-stage').scrollTop, height: document.querySelector('.pdf-stage').scrollHeight, saved: JSON.parse(localStorage.getItem('md-reader-state-v1')).documents.find(doc => doc.kind === 'pdf') }))));
   await page.click('[data-pdf-fit]');
   await page.waitForFunction(() => document.querySelector('.pdf-message')?.hidden && document.querySelector('[data-pdf-fit]')?.textContent === '100%');
   await page.evaluate(() => {
@@ -127,6 +160,7 @@ try {
     const touch = (id, x) => new Touch({ identifier: id, target: stage, clientX: x, clientY: 300 });
     stage.dispatchEvent(new TouchEvent('touchstart', { touches: [touch(1, 100), touch(2, 200)] }));
     stage.dispatchEvent(new TouchEvent('touchmove', { cancelable: true, touches: [touch(1, 50), touch(2, 250)] }));
+    if (document.querySelector('[data-pdf-fit]').textContent !== '200%' || !document.querySelector('.pdf-sheet').style.transform.includes('scale(2)')) throw new Error('PDF must zoom during the gesture');
     stage.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch(1, 50), touch(2, 250)] }));
   });
   await page.waitForFunction(() => document.querySelector('[data-pdf-fit]')?.textContent === '200%' && document.querySelector('.pdf-message')?.hidden);
@@ -144,6 +178,23 @@ try {
   assert.equal(await page.locator('[data-action="toggle-mode"]').count(), 0);
   assert.equal(await page.locator('#markdown-body img[src^="data:image/"]').count(), 1);
   await page.click('[data-text-zoom="1"]');
+  const pinchWord = async factor => page.evaluate(factor => {
+    const body = document.querySelector('#markdown-body');
+    const touch = (id, x) => new Touch({ identifier: id, target: body, clientX: x, clientY: 300 });
+    body.dispatchEvent(new TouchEvent('touchstart', { touches: [touch(1, 145), touch(2, 245)] }));
+    body.dispatchEvent(new TouchEvent('touchmove', { cancelable: true, touches: [touch(1, 195 - 50 * factor), touch(2, 195 + 50 * factor)] }));
+    const scale = Number(body.style.zoom);
+    body.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch(1, 145), touch(2, 245)] }));
+    return scale;
+  }, factor);
+  const beforeImage = await page.locator('#markdown-body img').evaluate(image => image.getBoundingClientRect().width);
+  assert.equal(await pinchWord(2), 2.5);
+  assert.equal(await page.locator('[data-text-size]').textContent(), '250%');
+  assert.ok(await page.locator('#markdown-body img').evaluate(image => image.getBoundingClientRect().width) > beforeImage * 1.9, 'Pinch must enlarge images as well as text');
+  assert.equal(await pinchWord(.5), 1.25);
+  assert.equal(await page.evaluate(() => visualViewport.scale), 1, 'Pinching content must not enlarge the toolbar');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'Zooming Word must keep the phone viewport width');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(2300);
   await page.screenshot({ path: resolve(screenshots, 'Word-阅读.png') });
   await page.evaluate(() => window.scrollTo(0, 1000));
@@ -184,5 +235,5 @@ try {
   await page.reload(); await page.waitForSelector('.document-card');
   assert.equal(await page.locator('.document-card').count(), 3);
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('PASS: v1 MD migration/editing, categories, PDF pages/swipe/zoom, DOCX headings/table/image/search, duplicate imports, offline reload/positions, invalid files, quota rollback; no external requests or browser errors.');
+  console.log('PASS: v1 MD migration/editing, categories, PDF pixels/pages/swipe/live pinch, Word live pinch including images, DOCX/search, offline position/zoom restoration, duplicates, invalid files and quota rollback; no external requests or browser errors.');
 } finally { await browser.close(); }
