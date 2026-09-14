@@ -80,7 +80,7 @@ try {
   const legacyContent = '# 原来的 MD\n\n| 功能 | 状态 |\n| --- | --- |\n| 保留文档 | 正常 |\n\n数学公式：$E=mc^2$\n\n```javascript\nconsole.log("offline");\n```\n\n' + '旧文档继续阅读。\n\n'.repeat(100);
   await page.evaluate(async content => {
     const doc = { id: 'legacy-md', name: '原来的文档.md', content, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z' };
-    localStorage.setItem('md-reader-state-v1', JSON.stringify({ documents: [{ ...doc, content: undefined }], currentId: doc.id, settings: { theme: 'paper', fontSize: 17, fontStyle: 'sans', lineWidth: 'narrow' } }));
+    localStorage.setItem('md-reader-state-v1', JSON.stringify({ documents: [{ ...doc, content: undefined }], currentId: doc.id, settings: { theme: 'paper', fontSize: null, fontStyle: 'sans', lineWidth: 'narrow' } }));
     await new Promise((resolve, reject) => {
       const request = indexedDB.open('md-reader-documents', 1);
       request.onupgradeneeded = () => request.result.createObjectStore('documents', { keyPath: 'id' });
@@ -234,6 +234,46 @@ try {
   await page.evaluate(() => window.restoreTransactions());
   await page.reload(); await page.waitForSelector('.document-card');
   assert.equal(await page.locator('.document-card').count(), 3);
+  console.log('Checking redesigned desk…');
+  await page.locator('[data-resume-doc]').press('Enter');
+  await page.waitForSelector('#markdown-body');
+  assert.equal(await page.locator('.reader-title strong').textContent(), word.name);
+  await page.waitForFunction(() => window.scrollY > 900);
+  await page.click('[data-view="library"]');
+  // Long file names are clamped visually and kept complete in the accessible name.
+  const longName = '移动端文档阅读与排版规范（2026 年修订版，含兼容说明与附录）.md';
+  await page.click('[data-open-doc="legacy-md"]');
+  await page.click('[data-action="toggle-mode"]');
+  await page.fill('#doc-name', longName);
+  await page.click('[data-view="library"]');
+  await page.reload(); await page.waitForSelector('.document-card');
+  assert.equal(await page.locator('.document-card').first().getAttribute('aria-label'), `打开 ${longName}`);
+  for (const width of [320, 390, 430, 1100]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Desk must fit ${width}px`);
+    const tops = await page.locator('.document-cover').evaluateAll(items => items.map(item => item.getBoundingClientRect().top));
+    assert.ok(Math.abs(tops[0] - tops[1]) < 1, 'Covers in the same row must align');
+    await page.screenshot({ path: resolve(screenshots, `书桌-${width}.png`), fullPage: true });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.click('[data-view="settings"]');
+  assert.equal(await page.locator('.font-stepper span').textContent(), '17');
+  await page.click('button[data-font="1"]');
+  assert.equal(await page.locator('.font-stepper span').textContent(), '18');
+  await page.click('button[data-font="-1"]');
+  assert.equal(await page.locator('.font-stepper span').textContent(), '17');
+  await page.screenshot({ path: resolve(screenshots, '设置.png'), fullPage: true });
+  await page.click('[data-theme-option="dark"]');
+  await page.click('[data-view="library"]');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('md-reader-state-v1')).settings.fontSize), 17);
+  await page.screenshot({ path: resolve(screenshots, '书桌-深色.png'), fullPage: true });
+  await page.reload(); await page.waitForSelector('.document-card');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+  await page.click('[data-view="settings"]'); await page.click('[data-theme-option="paper"]'); await page.click('[data-view="library"]');
+  await page.screenshot({ path: resolve(screenshots, '文档架.png'), fullPage: true });
+  await page.click('[data-open-doc="legacy-md"]'); await page.waitForSelector('#markdown-body h1');
+  assert.ok(await page.locator('#markdown-body').evaluate(body => parseFloat(getComputedStyle(body).fontSize)) >= 17);
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('PASS: v1 MD migration/editing, categories, PDF pixels/pages/swipe/live pinch, Word live pinch including images, DOCX/search, offline position/zoom restoration, duplicates, invalid files and quota rollback; no external requests or browser errors.');
+  console.log('PASS: MD migration/editing, invalid font recovery, PDF pixels/cache/swipe/pinch, Word images/pinch/search, offline positions, duplicates and quota rollback; desk layouts 320–1100px, aligned covers, long names, keyboard resume, theme persistence and font controls; no external requests or browser errors.');
 } finally { await browser.close(); }

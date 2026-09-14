@@ -1,4 +1,5 @@
 import './style.css';
+import { libraryView } from './library-view';
 import { bindTextZoom } from './text-zoom';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark-dimmed.css';
@@ -6,11 +7,11 @@ import type { DocumentKind, FontStyle, MarkdownDocument, StoredState, Theme, Vie
 import { loadState, saveState, saveMetadata, loadDocumentData } from './store';
 import { readDocument, MAX_FILE_BYTES } from './import-document';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { decorateRenderedMarkdown, plainTextFromMarkdown, renderMarkdown, type TocEntry } from './markdown';
+import { decorateRenderedMarkdown, renderMarkdown, type TocEntry } from './markdown';
 
 const SAMPLE = `# 欢迎使用轻阅
 
-这是一个只在本机工作的文档阅读器，支持 PDF、Word（.docx）和 Markdown。点右上角的 **打开文件**，就可以阅读手机里的 \`.md\` 文档。
+这是一个只在本机工作的文档阅读器，支持 PDF、Word（.docx）和 Markdown。点击首页的 **打开文件**，就可以导入手机里的文档。
 
 ## 常用格式
 
@@ -50,7 +51,7 @@ const icons: Record<string, string> = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
   toc: '<svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
-  settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3A1.7 1.7 0 0 0 14 21v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>',
+  settings: '<svg viewBox="0 0 24 24"><path d="M4 7h8M16 7h4M4 17h4M12 17h8"/><circle cx="14" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>',
   eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>',
@@ -74,7 +75,6 @@ let renderGeneration = 0;
 let importing = false;
 let ready = false;
 let restoringPosition = false;
-const labels: Record<DocumentKind, string> = { md: 'MD', pdf: 'PDF', word: 'Word' };
 const ReaderFiles = registerPlugin<{ drainFiles(): Promise<{ files: Array<{ name: string; base64?: string; content?: string; error?: string }> }>; addListener(name: string, callback: () => void): Promise<unknown> }>('ReaderFiles');
 
 function currentDocument(): MarkdownDocument | undefined {
@@ -91,7 +91,7 @@ function applyAppearance(): void {
   document.documentElement.style.setProperty('--reader-size', `${state.settings.fontSize}px`);
   document.documentElement.dataset.width = state.settings.lineWidth;
   const dark = state.settings.theme === 'dark';
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#121A26' : state.settings.theme === 'paper' ? '#F4F6FA' : '#F8F9FC');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#20211F' : state.settings.theme === 'paper' ? '#F7F4EE' : '#FFFFFF');
 }
 
 async function persist(): Promise<void> {
@@ -118,29 +118,10 @@ function render(): void {
 
 function renderLibrary(): void {
   const docs = [...state.documents].filter(doc => category === 'all' || (doc.kind ?? 'md') === category).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt));
-  app.innerHTML = `<div class="app-shell library-shell">
-    <header class="library-header"><div class="brand"><span>${icons.book}</span><div><strong>轻阅</strong><small>让阅读轻一点</small></div></div><button class="icon-button" data-view="settings" aria-label="设置">${icons.settings}</button></header>
-    <section class="hero"><div class="hero-art" aria-hidden="true">${icons.book}</div><p>随身文档 · 离线可读</p><h1>打开文档，<br>接着上次读。</h1><div class="hero-actions"><button class="primary-button" data-action="open-file">${icons.folder}打开文件</button><button class="secondary-button" data-action="new-doc">${icons.plus}新建 MD</button></div><small class="supported-files">PDF · Word（.docx）· MD</small></section>
-    <nav class="library-tabs" aria-label="文档类型">${(['all', 'word', 'pdf', 'md'] as const).map(kind => `<button data-category="${kind}" class="${category === kind ? 'active' : ''}" aria-pressed="${category === kind}">${kind === 'all' ? '全部' : labels[kind]}<small>${state.documents.filter(doc => kind === 'all' || (doc.kind ?? 'md') === kind).length}</small></button>`).join('')}</nav>
-    <div class="section-title"><h2>最近阅读</h2><span>${docs.length} 篇</span></div>
-    <main class="document-list">${docs.length ? docs.map(documentCard).join('') : `<div class="empty-library"><span>${icons.folder}</span><h3>还没有${category === 'all' ? '' : labels[category]}文档</h3><p>打开手机中的 PDF、Word（.docx）或 MD 文件。</p></div>`}</main>
-    <p class="local-badge"><span></span>离线也能读 · 文件留在本机</p>
-  </div>`;
+  const recent = state.documents.find(doc => doc.id === state.currentId);
+  app.innerHTML = libraryView(docs, state.documents, category, recent, icons, formatRelative);
   bindCommonEvents();
   document.querySelectorAll<HTMLButtonElement>('[data-category]').forEach(button => button.addEventListener('click', () => { category = button.dataset.category as typeof category; render(); }));
-}
-
-function documentCard(doc: MarkdownDocument): string {
-  const kind = doc.kind ?? 'md';
-  if (kind !== 'md') {
-    const template = document.createElement('template'); template.innerHTML = doc.content.slice(0, 2000);
-    const preview = kind === 'pdf' ? (doc.pageCount ? `第 ${doc.page ?? 1} / ${doc.pageCount} 页 · 点击继续阅读` : '保留原排版 · 左右翻页 · 支持放大') : (template.content.textContent?.slice(0, 120) || 'Word 文档 · 点击阅读');
-    return `<article class="document-card" data-open-doc="${doc.id}"><div class="doc-icon file-kind-${kind}">${labels[kind]}</div><div class="doc-content"><h3>${escapeHtml(doc.name)}</h3><p>${escapeHtml(preview)}</p><small>${formatRelative(doc.updatedAt)} · ${labels[kind]} · 已保存到本机</small></div><span class="chevron">${icons.chevron}</span></article>`;
-  }
-  const preview = plainTextFromMarkdown(doc.content.slice(0, 2000)).slice(0, 120) || '空白文档';
-  const headings = (doc.content.match(/^#{1,6}\s/gm) ?? []).length;
-  const words = doc.content.replace(/\s/g, '').length;
-  return `<article class="document-card" data-open-doc="${doc.id}"><div class="doc-icon">${icons.book}</div><div class="doc-content"><h3>${escapeHtml(doc.name)}</h3><p>${escapeHtml(preview)}</p><small>${formatRelative(doc.updatedAt)} · ${headings} 个章节 · ${words} 字</small></div><span class="chevron">${icons.chevron}</span></article>`;
 }
 
 async function renderReader(): Promise<void> {
@@ -190,19 +171,19 @@ function renderSettings(): void {
   app.innerHTML = `<div class="app-shell settings-shell">
     <header class="simple-header"><button class="icon-button bare" data-view="library">${icons.back}</button><h1>阅读设置</h1><span></span></header>
     <main>
-      <h2>主题</h2><section class="setting-card"><div class="theme-grid">${themeOption('paper','柔和','淡蓝')}${themeOption('light','明亮','清爽')}${themeOption('dark','深色','夜读')}</div></section>
+      <h2>主题</h2><section class="setting-card"><div class="theme-grid">${themeOption('paper','纸白','柔和')}${themeOption('light','明亮','清爽')}${themeOption('dark','深色','夜读')}</div></section>
       <h2>排版</h2><section class="setting-card">
         <div class="setting-row"><div><strong>正文字号</strong><small>调整 Markdown 内容的大小</small></div><div class="font-stepper"><button data-font="-1">A−</button><span>${state.settings.fontSize}</span><button data-font="1">A＋</button></div></div>
         <div class="setting-row"><div><strong>字体风格</strong><small>选择更适合你的阅读感觉</small></div><div class="mini-segment"><button data-font-style="sans" class="${state.settings.fontStyle === 'sans' ? 'active':''}">简洁</button><button data-font-style="serif" class="${state.settings.fontStyle === 'serif' ? 'active':''}">书卷</button></div></div>
         <div class="setting-row"><div><strong>页面宽度</strong><small>窄栏更适合专注阅读</small></div><div class="mini-segment"><button data-line-width="narrow" class="${state.settings.lineWidth === 'narrow' ? 'active':''}">窄栏</button><button data-line-width="wide" class="${state.settings.lineWidth === 'wide' ? 'active':''}">宽栏</button></div></div>
       </section>
-      <h2>关于轻阅</h2><section class="setting-card"><div class="about-row"><span>${icons.book}</span><div><strong>轻阅 1.3 · 离线文档阅读器</strong><small>支持 PDF 原版翻页与放大、Word（.docx）阅读、Markdown 阅读与编辑。导入后可离线查看；旧 .doc 暂不支持。Word 按手机屏幕重排，复杂版式可能不同。</small></div></div></section>
+      <h2>关于轻阅</h2><section class="setting-card"><div class="about-row"><span>${icons.book}</span><div><strong>轻阅 1.4 · 离线文档阅读器</strong><small>支持 PDF 原版翻页与放大、Word（.docx）阅读、Markdown 阅读与编辑。导入后可离线查看；旧 .doc 暂不支持。Word 按手机屏幕重排，复杂版式可能不同。</small></div></div></section>
       <p class="privacy-note">无需登录、没有网络同步、没有广告。</p>
     </main>
   </div>`;
   bindCommonEvents();
   document.querySelectorAll<HTMLButtonElement>('[data-theme-option]').forEach(button => button.addEventListener('click', () => { state.settings.theme = button.dataset.themeOption as Theme; void persist(); render(); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-font]').forEach(button => button.addEventListener('click', () => { state.settings.fontSize = Math.min(24, Math.max(14, state.settings.fontSize + Number(button.dataset.font))); void persist(); render(); }));
+  document.querySelectorAll<HTMLButtonElement>('button[data-font]').forEach(button => button.addEventListener('click', () => { state.settings.fontSize = Math.min(24, Math.max(14, state.settings.fontSize + Number(button.dataset.font))); void persist(); render(); }));
   document.querySelectorAll<HTMLButtonElement>('[data-font-style]').forEach(button => button.addEventListener('click', () => { state.settings.fontStyle = button.dataset.fontStyle as FontStyle; void persist(); render(); }));
   document.querySelectorAll<HTMLButtonElement>('[data-line-width]').forEach(button => button.addEventListener('click', () => { state.settings.lineWidth = button.dataset.lineWidth as 'narrow'|'wide'; void persist(); render(); }));
 }
@@ -213,9 +194,9 @@ function themeOption(value: Theme, label: string, caption: string): string {
 
 function bindCommonEvents(): void {
   document.querySelectorAll<HTMLElement>('[data-view]').forEach(el => el.addEventListener('click', async () => { if (mode === 'edit') await flushEditor(); recordPosition(); view = el.dataset.view as typeof view; searchTerm = ''; window.scrollTo(0, 0); render(); }));
-  document.querySelector('[data-action="open-file"]')?.addEventListener('click', () => fileInput.click());
+  document.querySelectorAll('[data-action="open-file"]').forEach(button => button.addEventListener('click', () => fileInput.click()));
   document.querySelector('[data-action="new-doc"]')?.addEventListener('click', () => createDocument('未命名.md', '# 未命名\n\n从这里开始写。\n'));
-  document.querySelectorAll<HTMLElement>('[data-open-doc]').forEach(el => el.addEventListener('click', () => openDocument(el.dataset.openDoc!)));
+  document.querySelectorAll<HTMLElement>('[data-open-doc], [data-resume-doc]').forEach(el => el.addEventListener('click', () => openDocument((el.dataset.openDoc ?? el.dataset.resumeDoc)!)));
 }
 
 function bindReaderEvents(): void {

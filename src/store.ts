@@ -48,6 +48,10 @@ export async function loadState(): Promise<StoredState> {
         settings: { ...defaultSettings, ...(parsed.settings ?? {}) } };
     }
   } catch { /* recover from the content database below */ }
+  // Older settings clicks could save NaN as null; preserve the documents and repair only the size.
+  if (!Number.isFinite(meta.settings.fontSize) || meta.settings.fontSize < 14 || meta.settings.fontSize > 24) {
+    meta.settings.fontSize = defaultSettings.fontSize;
+  }
   const db = await openDatabase();
   const docs = await new Promise<MarkdownDocument[]>((resolve, reject) => {
     const request = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();

@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: '轻阅',
   webDir: 'dist',
   android: {
-    backgroundColor: '#F4F6FA'
+    backgroundColor: '#F7F4EE'
   }
 };
 
